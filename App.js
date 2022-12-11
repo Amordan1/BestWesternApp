@@ -9,6 +9,62 @@ import * as SplashScreen from 'expo-splash-screen'
 import Dropdown from './components/Dropdown';
 import * as SQLite from "expo-sqlite";
 
+function openDatabase() {
+  if (Platform.OS === "web") {
+    return {
+      transaction: () => {
+        return {
+          executeSql: () => {},
+        };
+      },
+    };
+  }
+
+  const db = SQLite.openDatabase("db.db");
+  return db;
+}
+
+const db = openDatabase();
+
+function Items({ done: doneHeading, onPressItem }) {
+  const [items, setItems] = useState(null);
+
+  useEffect(() => {
+    db.transaction((tx) => {
+      tx.executeSql(
+        `select id, value, date(itemDate) as itemDate from items order by itemDate desc;`,
+        null,
+        (_, { rows: { _array } }) => setItems(_array)
+      );
+    });
+  }, []);
+
+  const heading = "";
+
+  if (items === null || items.length === 0) {
+    return null;
+  }
+
+  return (
+    <View style={styles.sectionContainer}>
+      <Text style={styles.sectionHeading}>{heading}</Text>
+      {items.map(({ id, done, value, itemDate }) => (
+        <TouchableOpacity
+          key={id}
+          onPress={() => onPressItem && onPressItem(id)}
+          style={{
+            backgroundColor: done ? "#1c9963" : "#fff",
+            borderColor: "#000",
+            borderWidth: 1,
+            padding: 8,
+          }}
+        >
+          <Text style={{ color: done ? "#fff" : "#000" }}>{value}</Text>
+        </TouchableOpacity>
+      ))}
+    </View>
+  );
+}
 
 const App = () => {
 
@@ -28,6 +84,9 @@ const App = () => {
   const [err2, setErr2] = useState(true);
   const [err1Text, setErr1Text] = useState("");
   const [err2Text, setErr2Text] = useState("");
+  const [forceUpdate, forceUpdateId] = useForceUpdate();
+  const [render, setRender] = useState(false)
+
   
   const firstRender = useFirstRender();
   function useFirstRender() {
@@ -83,7 +142,12 @@ const App = () => {
   },[nightCount])
 
   useEffect(() => {
+    console.log("Current Est: " + CurrentEst)
   },[CurrentEst])
+
+  useEffect(() => {
+    console.log("Render: " + render)
+  },[render]);
 
   useEffect(() => {
   },[err2Text]);
@@ -118,6 +182,11 @@ const App = () => {
           onPress={() => {
             handleCalcButtonPress()
             if (err1 == false && err2 == false){
+              if (render == true){
+                add()
+              } else {
+                setRender(true)
+              }
               navigation.navigate('Estimates');
             }
           }}>
@@ -126,6 +195,39 @@ const App = () => {
         </ScrollView>
       </SafeAreaView>
     );
+  }
+
+  useEffect(() => {
+    db.transaction((tx) => {
+      tx.executeSql(
+        "drop table items;"
+      );
+      tx.executeSql(
+        "create table if not exists items (id integer primary key not null, done int, value text, itemDate real);"
+      );
+    });
+  }, []);
+
+  async function add(text) {
+    // is text empty?
+    if (text === null || text === "") {
+      return false;
+    }
+    db.transaction(
+      (tx) => {
+        tx.executeSql("insert into items (done, value, itemDate) values (0, ?, julianday('now'))",[CurrentEst]);
+        tx.executeSql("select * from items", [], (_, { rows }) =>
+          console.log(JSON.stringify(rows)),
+        );
+      },
+      null,
+      forceUpdate
+    );
+  };
+
+  function useForceUpdate() {
+    const [value, setValue] = useState(0);
+    return [() => setValue(value + 1), value];
   }
   
   function handleCalcButtonPress(){
@@ -176,18 +278,30 @@ const App = () => {
         />      
         <Text style={styles.title}>Current Estimate</Text>
         <ScrollView>
-        <TextInput
-                style={styles.inputCalc}
-                value={CurrentEst}
-                placeholder="Current Estimate"
-                selectTextOnFocus={false}
-                editable={false}
-          />
-        <Text style={styles.estitext}>Previous Estimates</Text>
-        </ScrollView>
-        <ScrollView style={styles.listArea}>
-            
+          <TextInput
+                  style={styles.inputCalc}
+                  value={CurrentEst}
+                  placeholder="Current Estimate"
+                  selectTextOnFocus={false}
+                  editable={false}
+            />
+          <Text style={styles.estitext}>Previous Estimates</Text>
+          <ScrollView style={styles.listArea}>
+            <Items
+                done
+                key={`forceupdate-done-${forceUpdateId}`}
+                onPressItem={(id) =>
+                  db.transaction(
+                    (tx) => {
+                      tx.executeSql(`delete from items where id = ?;`, [id]);
+                    },
+                    null,
+                    forceUpdate
+                  )
+                }
+              />
           </ScrollView>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -277,6 +391,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
     paddingTop: Constants.statusBarHeight,
   },
+  sectionContainer: {
+    marginBottom: 16,
+    marginHorizontal: 16,
+  },
   content: {
     flex: 1,
     padding: 10,
@@ -286,6 +404,8 @@ const styles = StyleSheet.create({
   listArea: {
     backgroundColor: "#f0f0f0",
     flex: 1,
+    marginTop: 16,
+    textAlign: 'center'
   },
   image: {
     height: 130,
@@ -378,7 +498,8 @@ const styles = StyleSheet.create({
     height: 45,
     padding: 5,
     marginBottom: 10,
-    fontSize: 16
+    fontSize: 16,
+    color: 'black'
   },
 });
 
